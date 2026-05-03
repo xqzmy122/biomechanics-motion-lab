@@ -1,0 +1,2 @@
+export const POSTURE_MEASUREMENT_DESCRIPTION =
+  'Approximate 2D checks from your webcam: (1) head — how far the nose sits horizontally from the midpoint between both ears (proxy for forward head / side lean in the frame); (2) shoulders — vertical difference between left and right shoulder (level collarbone → small value). Lighting, 3/4 angle, or hair can skew readings; this is not a clinical assessment.'
