@@ -2,10 +2,8 @@ import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 
 import {
   angleAt,
-  distance2,
   meanVisibility,
   midpoint,
-  segmentAngleVsHorizontal,
   toPoint2,
 } from '@/features/exercise-session/lib/geometry'
 import type { IExerciseThresholds } from '@/shared/types/exercise'
@@ -75,16 +73,6 @@ export const analyzePushupFrame = (
   const lineAngle = angleAt(shoulderMid, hip, knee)
   const bodyLineDeg = lineAngle === null ? 0 : Math.abs(180 - lineAngle)
 
-  const shoulderWidth = distance2(
-    toPoint2(lm[IDX.L_SH]),
-    toPoint2(lm[IDX.R_SH]),
-  )
-  const elbowDrift = Math.abs(el.x - shoulderMid.x)
-  const flareRatio =
-    shoulderWidth > 1e-4 ? elbowDrift / shoulderWidth : null
-
-  const upperArmAngle = segmentAngleVsHorizontal(sh, el)
-
   const events: IFeedbackEvent[] = []
   const comments: string[] = []
 
@@ -99,22 +87,6 @@ export const analyzePushupFrame = (
       severity: 'warning',
     })
     comments.push('Pelvis deviated from shoulder–knee line.')
-  }
-
-  if (
-    flareRatio !== null &&
-    flareRatio > t.elbowFlareRatio &&
-    upperArmAngle !== null &&
-    upperArmAngle > 38 &&
-    elbowAngle !== null &&
-    elbowAngle < t.elbowTopDeg - 10
-  ) {
-    events.push({
-      id: 'ELBOW_FLARE',
-      message: 'Tuck elbows slightly — avoid letting them flare far past the torso.',
-      severity: 'warning',
-    })
-    comments.push('Elbow flare exceeded heuristic threshold.')
   }
 
   let phase: IPushupPhase = prev.phase

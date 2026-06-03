@@ -1,12 +1,13 @@
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 
 import { isFrontSquatStanding } from '@/features/exercise-session/model/analyzers/squatFrontAnalyzer'
+import { isPushupFrontTopPose } from '@/features/exercise-session/model/analyzers/pushupFrontAnalyzer'
 import {
   angleAt,
   meanVisibility,
   toPoint2,
 } from '@/features/exercise-session/lib/geometry'
-import type { IAnalyzerKind, IExerciseThresholds, ISquatCameraView } from '@/shared/types/exercise'
+import type { IAnalyzerKind, IExerciseCameraView, IExerciseThresholds } from '@/shared/types/exercise'
 
 const SQUAT_IDX = {
   L_HIP: 23,
@@ -109,14 +110,28 @@ const isPushSideVisible = (lm: NormalizedLandmark[], side: ReturnType<typeof pic
   meanVisibility(lm, [side.shoulder, side.elbow, side.wrist, side.hip, side.knee]) >=
   MIN_VIS
 
+const FRONT_PUSH_IDX = [
+  PUSH_IDX.L_SH,
+  PUSH_IDX.R_SH,
+  PUSH_IDX.L_EL,
+  PUSH_IDX.R_EL,
+  PUSH_IDX.L_WR,
+  PUSH_IDX.R_WR,
+  PUSH_IDX.L_HIP,
+  PUSH_IDX.R_HIP,
+] as const
+
+const isPushFrontVisible = (lm: NormalizedLandmark[]) =>
+  meanVisibility(lm, [...FRONT_PUSH_IDX]) >= MIN_VIS
+
 export const isCalibrationPoseOk = (
   kind: IAnalyzerKind,
   lm: NormalizedLandmark[],
   t: IExerciseThresholds,
-  squatView: ISquatCameraView = 'side',
+  cameraView: IExerciseCameraView = 'side',
 ): boolean => {
   if (kind === 'squat') {
-    if (squatView === 'front') {
+    if (cameraView === 'front') {
       if (!isSquatFrontVisible(lm)) return false
       return isFrontSquatStanding(lm, t)
     }
@@ -129,6 +144,11 @@ export const isCalibrationPoseOk = (
     const kneeAngle = angleAt(hip, knee, ankle)
     if (kneeAngle === null) return false
     return kneeAngle >= t.kneeStandDeg - 6
+  }
+
+  if (cameraView === 'front') {
+    if (!isPushFrontVisible(lm)) return false
+    return isPushupFrontTopPose(lm, t)
   }
 
   const side = pickPushSide(lm)
@@ -156,13 +176,14 @@ export const isCalibrationPoseOk = (
 export const isCalibrationVisible = (
   kind: IAnalyzerKind,
   lm: NormalizedLandmark[],
-  squatView: ISquatCameraView = 'side',
+  cameraView: IExerciseCameraView = 'side',
 ): boolean => {
   if (kind === 'squat') {
-    if (squatView === 'front') return isSquatFrontVisible(lm)
+    if (cameraView === 'front') return isSquatFrontVisible(lm)
     const side = pickSquatSide(lm)
     return isSquatSideVisible(lm, side)
   }
+  if (cameraView === 'front') return isPushFrontVisible(lm)
   const side = pickPushSide(lm)
   return isPushSideVisible(lm, side)
 }

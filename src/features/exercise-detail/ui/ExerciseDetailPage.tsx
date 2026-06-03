@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { getExerciseById } from '@/shared/config/exercises'
-import type { ISquatCameraView } from '@/shared/types/exercise'
+import type { IExerciseCameraView } from '@/shared/types/exercise'
 import { Alert, AlertDescription, AlertTitle } from '@/shared/ui/alert'
 import { Button } from '@/shared/ui/button'
 import {
@@ -19,7 +19,7 @@ import { Separator } from '@/shared/ui/separator'
 import { cn } from '@/shared/lib/cn'
 
 const SQUAT_VIEW_OPTIONS: Array<{
-  id: ISquatCameraView
+  id: IExerciseCameraView
   label: string
   description: string
 }> = [
@@ -31,14 +31,31 @@ const SQUAT_VIEW_OPTIONS: Array<{
   {
     id: 'front',
     label: 'Front view',
-    description: 'Knee valgus and lateral torso shift (uses front camera on phones)',
+    description: 'Knee valgus and lateral torso shift',
+  },
+]
+
+const PUSHUP_VIEW_OPTIONS: Array<{
+  id: IExerciseCameraView
+  label: string
+  description: string
+}> = [
+  {
+    id: 'side',
+    label: 'Side view',
+    description: 'Rep count and body line (hips sag / pike)',
+  },
+  {
+    id: 'front',
+    label: 'Front view',
+    description: 'Elbow flare — face the camera while pushing',
   },
 ]
 
 export const ExerciseDetailPage = () => {
   const { exerciseId } = useParams()
   const navigate = useNavigate()
-  const [squatView, setSquatView] = useState<ISquatCameraView>('side')
+  const [cameraView, setCameraView] = useState<IExerciseCameraView>('side')
 
   const exercise = useMemo(() => {
     if (!exerciseId) return undefined
@@ -56,9 +73,14 @@ export const ExerciseDetailPage = () => {
     )
   }
 
-  const isSquat = exercise.id === 'squat'
+  const supportsCameraView = exercise.id === 'squat' || exercise.id === 'pushup'
+  const viewOptions =
+    exercise.id === 'pushup' ? PUSHUP_VIEW_OPTIONS : SQUAT_VIEW_OPTIONS
+
   const activeCameraSetup =
-    isSquat && squatView === 'front' && exercise.cameraSetupFront
+    supportsCameraView &&
+    cameraView === 'front' &&
+    exercise.cameraSetupFront
       ? exercise.cameraSetupFront
       : exercise.cameraSetup
 
@@ -69,7 +91,7 @@ export const ExerciseDetailPage = () => {
   }
 
   const handleStartClick = () => {
-    const params = isSquat ? `?view=${squatView}` : ''
+    const params = supportsCameraView ? `?view=${cameraView}` : ''
     navigate(`/exercise/${exercise.id}/session${params}`)
   }
 
@@ -99,16 +121,16 @@ export const ExerciseDetailPage = () => {
             <CardDescription>{activeCameraSetup}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {isSquat ? (
+            {supportsCameraView ? (
               <div className="space-y-3">
                 <p className="text-sm font-medium">Camera angle</p>
                 <div
                   className="grid gap-2 sm:grid-cols-2"
                   role="radiogroup"
-                  aria-label="Squat camera angle"
+                  aria-label={`${exercise.title} camera angle`}
                 >
-                  {SQUAT_VIEW_OPTIONS.map((option) => {
-                    const selected = squatView === option.id
+                  {viewOptions.map((option) => {
+                    const selected = cameraView === option.id
                     return (
                       <button
                         key={option.id}
@@ -116,11 +138,11 @@ export const ExerciseDetailPage = () => {
                         role="radio"
                         aria-checked={selected}
                         tabIndex={0}
-                        onClick={() => setSquatView(option.id)}
+                        onClick={() => setCameraView(option.id)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault()
-                            setSquatView(option.id)
+                            setCameraView(option.id)
                           }
                         }}
                         className={cn(

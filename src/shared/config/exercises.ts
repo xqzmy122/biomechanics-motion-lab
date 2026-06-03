@@ -5,7 +5,7 @@ const DEFAULT_THRESHOLDS = {
   kneeStandDeg: 158,
   elbowBottomDeg: 95,
   elbowTopDeg: 158,
-  torsoLeanMaxDeg: 42,
+  torsoLeanMaxDeg: 60,
   kneeOverToeFootFraction: 0.32,
   depthHipBelowKneeEnabled: true,
   depthParallelDeg: 100,
@@ -38,9 +38,11 @@ export const EXERCISES: IExerciseConfig[] = [
     id: 'pushup',
     title: 'Push-ups',
     summary:
-      'Side or slight diagonal view so elbows, shoulders, pelvis, and knees are visible.',
+      'Side or front view — side checks body line; front checks elbow flare when you face the camera.',
     cameraSetup:
-      'Side view preferred. Frame elbow, shoulder, pelvis, and knee on the working side.',
+      'Side view. Frame elbow, shoulder, pelvis, and knee on the working side.',
+    cameraSetupFront:
+      'Front view. Place the phone low, facing your chest — both arms, shoulders, and hips visible while you push up facing the camera.',
     analyzerKind: 'pushup',
     thresholds: { ...DEFAULT_THRESHOLDS },
   },

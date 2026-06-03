@@ -30,6 +30,7 @@ export interface ISessionHud {
   bodyLineDevDeg: number | null
   torsoShiftNorm: number | null
   hipDropNorm: number | null
+  elbowFlareNorm: number | null
   runtimeSec: number
 }
 

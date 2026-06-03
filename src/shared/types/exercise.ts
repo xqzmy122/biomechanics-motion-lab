@@ -2,7 +2,10 @@ export type IExerciseId = 'squat' | 'pushup'
 
 export type IAnalyzerKind = 'squat' | 'pushup'
 
-export type ISquatCameraView = 'side' | 'front'
+export type IExerciseCameraView = 'side' | 'front'
+
+/** @deprecated use IExerciseCameraView */
+export type ISquatCameraView = IExerciseCameraView
 
 export interface IExerciseThresholds {
   kneeBottomDeg: number

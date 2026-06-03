@@ -20,6 +20,10 @@ import {
   createInitialPushupState,
 } from '@/features/exercise-session/model/analyzers/pushupAnalyzer'
 import {
+  analyzePushupFrontFrame,
+  createInitialPushupFrontState,
+} from '@/features/exercise-session/model/analyzers/pushupFrontAnalyzer'
+import {
   analyzeSquatFrontFrame,
   createInitialSquatFrontState,
 } from '@/features/exercise-session/model/analyzers/squatFrontAnalyzer'
@@ -47,7 +51,7 @@ import {
   type ISessionSummary,
 } from '@/features/exercise-session/ui/SessionSummaryDialog'
 import { getExerciseById } from '@/shared/config/exercises'
-import type { ISquatCameraView } from '@/shared/types/exercise'
+import type { IExerciseCameraView } from '@/shared/types/exercise'
 import { Alert, AlertDescription, AlertTitle } from '@/shared/ui/alert'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -62,7 +66,7 @@ import { Progress } from '@/shared/ui/progress'
 
 type ISessionPhase = 'countdown' | 'calibrating' | 'active'
 
-const parseSquatView = (value: string | null): ISquatCameraView =>
+const parseCameraView = (value: string | null): IExerciseCameraView =>
   value === 'front' ? 'front' : 'side'
 
 const buildInitialHud = (): ISessionHud => ({
@@ -74,6 +78,7 @@ const buildInitialHud = (): ISessionHud => ({
   bodyLineDevDeg: null,
   torsoShiftNorm: null,
   hipDropNorm: null,
+  elbowFlareNorm: null,
   runtimeSec: 0,
 })
 
@@ -82,17 +87,18 @@ export const ExerciseSessionPage = () => {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
 
-  const squatView = parseSquatView(searchParams.get('view'))
+  const cameraView = parseCameraView(searchParams.get('view'))
 
   const exercise = useMemo(() => {
     if (!exerciseId) return undefined
     return getExerciseById(exerciseId)
   }, [exerciseId])
 
-  const facingPreference =
-    exercise?.analyzerKind === 'squat' && squatView === 'front'
-      ? 'user'
-      : 'environment'
+  const usesFrontCamera =
+    (exercise?.analyzerKind === 'squat' && cameraView === 'front') ||
+    (exercise?.analyzerKind === 'pushup' && cameraView === 'front')
+
+  const facingPreference = usesFrontCamera ? 'user' : 'environment'
 
   const {
     stream,
@@ -148,10 +154,13 @@ export const ExerciseSessionPage = () => {
   useEffect(() => {
     if (!exercise) return
     squatStateRef.current =
-      exercise.analyzerKind === 'squat' && squatView === 'front'
+      exercise.analyzerKind === 'squat' && cameraView === 'front'
         ? createInitialSquatFrontState()
         : createInitialSquatState()
-    pushupStateRef.current = createInitialPushupState()
+    pushupStateRef.current =
+      exercise.analyzerKind === 'pushup' && cameraView === 'front'
+        ? createInitialPushupFrontState()
+        : createInitialPushupState()
     smoothedRef.current = null
     lastRepsRef.current = 0
     workoutStartRef.current = null
@@ -164,7 +173,7 @@ export const ExerciseSessionPage = () => {
       setHud(nextHud)
       setPrompts([])
     })
-  }, [exercise, squatView, replayTick])
+  }, [exercise, cameraView, replayTick])
 
   useEffect(() => {
     if (!stream || !poseReady || !exercise) return
@@ -182,7 +191,7 @@ export const ExerciseSessionPage = () => {
       setCountdownSec(10)
       setCalibrationProgress(0)
     })
-  }, [stream, poseReady, exercise, squatView, replayTick])
+  }, [stream, poseReady, exercise, cameraView, replayTick])
 
   const finalizeSession = useCallback(() => {
     if (!exercise) return
@@ -264,8 +273,7 @@ export const ExerciseSessionPage = () => {
         const lm = smoothedRef.current
 
         const phase = sessionPhaseRef.current
-        const squatCameraView =
-          exercise.analyzerKind === 'squat' ? squatView : 'side'
+        const sessionCameraView = cameraView
 
         if (phase === 'countdown') {
           if (countdownStartRef.current === null) {
@@ -292,13 +300,13 @@ export const ExerciseSessionPage = () => {
           const visible = isCalibrationVisible(
             exercise.analyzerKind,
             lm,
-            squatCameraView,
+            sessionCameraView,
           )
           const poseOk = isCalibrationPoseOk(
             exercise.analyzerKind,
             lm,
             exercise.thresholds,
-            squatCameraView,
+            sessionCameraView,
           )
           if (visible && poseOk) {
             calibrationHoldMsRef.current += deltaMs
@@ -320,10 +328,13 @@ export const ExerciseSessionPage = () => {
             setSessionPhase('active')
             workoutStartRef.current = detectTs
             squatStateRef.current =
-              squatCameraView === 'front'
+              exercise.analyzerKind === 'squat' && sessionCameraView === 'front'
                 ? createInitialSquatFrontState()
                 : createInitialSquatState()
-            pushupStateRef.current = createInitialPushupState()
+            pushupStateRef.current =
+              exercise.analyzerKind === 'pushup' && sessionCameraView === 'front'
+                ? createInitialPushupFrontState()
+                : createInitialPushupState()
             lastRepsRef.current = 0
             calibrationHoldMsRef.current = 0
             lastCalibUiRef.current = -1
@@ -345,7 +356,7 @@ export const ExerciseSessionPage = () => {
 
           let outPartial: Partial<ISessionHud>
           if (exercise.analyzerKind === 'squat') {
-            if (squatCameraView === 'front') {
+            if (sessionCameraView === 'front') {
               const { state, out } = analyzeSquatFrontFrame(
                 lm,
                 squatStateRef.current as ISquatFrontState,
@@ -367,15 +378,27 @@ export const ExerciseSessionPage = () => {
               comments.push(...out.comments)
             }
           } else {
-            const { state, out } = analyzePushupFrame(
-              lm,
-              pushupStateRef.current,
-              exercise.thresholds,
-            )
-            pushupStateRef.current = state
-            outPartial = out.hud
-            events.push(...out.events)
-            comments.push(...out.comments)
+            if (sessionCameraView === 'front') {
+              const { state, out } = analyzePushupFrontFrame(
+                lm,
+                pushupStateRef.current,
+                exercise.thresholds,
+              )
+              pushupStateRef.current = state
+              outPartial = out.hud
+              events.push(...out.events)
+              comments.push(...out.comments)
+            } else {
+              const { state, out } = analyzePushupFrame(
+                lm,
+                pushupStateRef.current,
+                exercise.thresholds,
+              )
+              pushupStateRef.current = state
+              outPartial = out.hud
+              events.push(...out.events)
+              comments.push(...out.comments)
+            }
           }
 
           for (const c of comments) {
@@ -430,6 +453,7 @@ export const ExerciseSessionPage = () => {
             bodyLineDevDeg: outPartial.bodyLineDevDeg ?? null,
               torsoShiftNorm: outPartial.torsoShiftNorm ?? null,
               hipDropNorm: outPartial.hipDropNorm ?? null,
+              elbowFlareNorm: outPartial.elbowFlareNorm ?? null,
               runtimeSec,
           }
 
@@ -486,7 +510,7 @@ export const ExerciseSessionPage = () => {
     stream,
     poseReady,
     facingUser,
-    squatView,
+    cameraView,
     detectForVideo,
     pushPrompt,
     replayTick,
@@ -549,8 +573,9 @@ export const ExerciseSessionPage = () => {
     (sessionPhase === 'countdown' || sessionPhase === 'calibrating')
 
   const showHudTimer = sessionPhase === 'active'
-  const isSquatFront =
-    exercise.analyzerKind === 'squat' && squatView === 'front'
+  const isFrontView = cameraView === 'front'
+  const showViewBadge =
+    exercise.analyzerKind === 'squat' || exercise.analyzerKind === 'pushup'
 
   return (
     <div className="relative min-h-svh bg-black text-foreground">
@@ -618,9 +643,9 @@ export const ExerciseSessionPage = () => {
           <Badge variant="secondary" className="backdrop-blur">
             {exercise.title}
           </Badge>
-          {exercise.analyzerKind === 'squat' ? (
+          {showViewBadge ? (
             <Badge variant="outline" className="border-white/20 bg-black/40 text-white backdrop-blur">
-              {isSquatFront ? 'Front view' : 'Side view'}
+              {isFrontView ? 'Front view' : 'Side view'}
             </Badge>
           ) : null}
           <Badge variant="outline" className="border-white/20 bg-black/40 text-white backdrop-blur">
@@ -808,7 +833,7 @@ export const ExerciseSessionPage = () => {
       <div className="pointer-events-none absolute inset-x-0 bottom-28 mx-auto max-w-xl px-4 text-center text-sm text-white/90 drop-shadow-md">
         {exercise.analyzerKind === 'squat' && sessionPhase === 'active' ? (
           <p>
-            {isSquatFront ? (
+            {isFrontView ? (
               <>
                 Hip drop:{' '}
                 <span className="font-mono tabular-nums">
@@ -848,15 +873,33 @@ export const ExerciseSessionPage = () => {
         ) : null}
         {exercise.analyzerKind === 'pushup' && sessionPhase === 'active' ? (
           <p>
-            Elbow:{' '}
-            <span className="font-mono tabular-nums">
-              {hud.elbowAngleDeg === null ? '—' : `${Math.round(hud.elbowAngleDeg)}°`}
-            </span>
-            {' · '}
-            Body line deviation:{' '}
-            <span className="font-mono tabular-nums">
-              {hud.bodyLineDevDeg === null ? '—' : `${Math.round(hud.bodyLineDevDeg)}°`}
-            </span>
+            {isFrontView ? (
+              <>
+                Elbow:{' '}
+                <span className="font-mono tabular-nums">
+                  {hud.elbowAngleDeg === null ? '—' : `${Math.round(hud.elbowAngleDeg)}°`}
+                </span>
+                {' · '}
+                Elbow flare:{' '}
+                <span className="font-mono tabular-nums">
+                  {hud.elbowFlareNorm === null
+                    ? '—'
+                    : `${(hud.elbowFlareNorm * 100).toFixed(0)}%`}
+                </span>
+              </>
+            ) : (
+              <>
+                Elbow:{' '}
+                <span className="font-mono tabular-nums">
+                  {hud.elbowAngleDeg === null ? '—' : `${Math.round(hud.elbowAngleDeg)}°`}
+                </span>
+                {' · '}
+                Body line deviation:{' '}
+                <span className="font-mono tabular-nums">
+                  {hud.bodyLineDevDeg === null ? '—' : `${Math.round(hud.bodyLineDevDeg)}°`}
+                </span>
+              </>
+            )}
           </p>
         ) : null}
       </div>
