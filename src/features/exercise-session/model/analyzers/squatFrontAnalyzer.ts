@@ -108,6 +108,7 @@ export const createInitialSquatFrontState = (): ISquatFrontState => ({
   phase: 'stance',
   reps: 0,
   sawBottomThisRep: false,
+  minKneeAngleDeg: null,
   baselineHipY: null,
   baselineThighAngleDeg: null,
   bodyScale: null,

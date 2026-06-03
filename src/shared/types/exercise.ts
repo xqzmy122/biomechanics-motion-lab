@@ -12,6 +12,7 @@ export interface IExerciseThresholds {
   torsoLeanMaxDeg: number
   kneeOverToeFootFraction: number
   depthHipBelowKneeEnabled: boolean
+  depthParallelDeg: number
   bodyLineMaxDeg: number
   elbowFlareRatio: number
   valgusMaxNorm: number

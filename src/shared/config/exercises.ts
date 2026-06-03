@@ -8,6 +8,7 @@ const DEFAULT_THRESHOLDS = {
   torsoLeanMaxDeg: 42,
   kneeOverToeFootFraction: 0.32,
   depthHipBelowKneeEnabled: true,
+  depthParallelDeg: 100,
   bodyLineMaxDeg: 18,
   elbowFlareRatio: 0.52,
   valgusMaxNorm: 0.045,

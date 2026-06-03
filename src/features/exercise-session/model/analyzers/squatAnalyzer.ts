@@ -90,10 +90,40 @@ const kneeOverToeRatio = (
   return (relX * ux + relY * uy) / footLen
 }
 
+const trackMinKneeAngle = (current: number | null, kneeAngle: number): number =>
+  current === null ? kneeAngle : Math.min(current, kneeAngle)
+
+/** Depth at the deepest point of the rep — knee angle is reliable in side view; hip.y vs knee.y is not */
+const appendDepthFeedback = (
+  events: IFeedbackEvent[],
+  comments: string[],
+  minKneeAngleDeg: number,
+  t: IExerciseThresholds,
+) => {
+  if (minKneeAngleDeg <= t.depthParallelDeg) {
+    events.push({
+      id: 'DEPTH_OK',
+      message: 'Good depth — parallel squat reached.',
+      severity: 'success',
+    })
+    return
+  }
+
+  events.push({
+    id: 'DEPTH_SHALLOW',
+    message: 'Try a bit more depth — sink the hips slightly lower.',
+    severity: 'info',
+  })
+  comments.push(
+    `Shallow depth — minimum knee angle ${Math.round(minKneeAngleDeg)}° (target ≤ ${t.depthParallelDeg}°).`,
+  )
+}
+
 export const createInitialSquatState = (): ISquatState => ({
   phase: 'stance',
   reps: 0,
   sawBottomThisRep: false,
+  minKneeAngleDeg: null,
 })
 
 export const analyzeSquatFrame = (
@@ -147,6 +177,7 @@ export const analyzeSquatFrame = (
   let phase: ISquatPhase = prev.phase
   let reps = prev.reps
   let sawBottom = prev.sawBottomThisRep
+  let minKneeAngleDeg = prev.minKneeAngleDeg
 
   if (kneeAngle === null) {
     return {
@@ -168,41 +199,35 @@ export const analyzeSquatFrame = (
   const STANCE_LOCKOUT_GAP = 4
 
   if (phase === 'stance') {
-    if (kneeAngle < t.kneeStandDeg - STANCE_TO_ECCENTRIC_DELTA) phase = 'eccentric'
+    if (kneeAngle < t.kneeStandDeg - STANCE_TO_ECCENTRIC_DELTA) {
+      phase = 'eccentric'
+      minKneeAngleDeg = kneeAngle
+    }
   } else if (phase === 'eccentric') {
+    minKneeAngleDeg = trackMinKneeAngle(minKneeAngleDeg, kneeAngle)
     if (kneeAngle < t.kneeBottomDeg) {
       phase = 'bottom'
       sawBottom = true
-      if (t.depthHipBelowKneeEnabled) {
-        const hipBelowKnee = hip.y > knee.y + 0.012
-        if (hipBelowKnee) {
-          events.push({
-            id: 'DEPTH_OK',
-            message: 'Good depth — hip below knee.',
-            severity: 'success',
-          })
-        } else {
-          events.push({
-            id: 'DEPTH_SHALLOW',
-            message: 'Try a bit more depth — sink the hips slightly lower.',
-            severity: 'info',
-          })
-          comments.push('Depth shallow relative to hip–knee line.')
-        }
-      }
     }
   } else if (phase === 'bottom') {
-    if (kneeAngle > t.kneeBottomDeg + BOTTOM_EXIT_BUFFER) phase = 'concentric'
+    minKneeAngleDeg = trackMinKneeAngle(minKneeAngleDeg, kneeAngle)
+    if (kneeAngle > t.kneeBottomDeg + BOTTOM_EXIT_BUFFER) {
+      phase = 'concentric'
+      if (t.depthHipBelowKneeEnabled && sawBottom && minKneeAngleDeg !== null) {
+        appendDepthFeedback(events, comments, minKneeAngleDeg, t)
+      }
+    }
   } else if (phase === 'concentric') {
     if (kneeAngle > t.kneeStandDeg - STANCE_LOCKOUT_GAP) {
       phase = 'stance'
       if (sawBottom) reps += 1
       sawBottom = false
+      minKneeAngleDeg = null
     }
   }
 
   return {
-    state: { phase, reps, sawBottomThisRep: sawBottom },
+    state: { phase, reps, sawBottomThisRep: sawBottom, minKneeAngleDeg },
     out: {
       hud: {
         phaseLabel: phase,

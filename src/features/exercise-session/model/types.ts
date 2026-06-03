@@ -45,6 +45,7 @@ export interface ISquatState {
   phase: ISquatPhase
   reps: number
   sawBottomThisRep: boolean
+  minKneeAngleDeg: number | null
 }
 
 export interface ISquatFrontState extends ISquatState {
