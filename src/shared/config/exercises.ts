@@ -12,6 +12,11 @@ const DEFAULT_THRESHOLDS = {
   elbowFlareRatio: 0.52,
   valgusMaxNorm: 0.045,
   torsoShiftMaxNorm: 0.055,
+  frontHipDropEccentricNorm: 0.1,
+  frontHipDropBottomNorm: 0.22,
+  frontHipDropStandNorm: 0.06,
+  frontThighAngleEccentricDeg: 14,
+  frontThighAngleBottomDeg: 32,
   smoothingAlpha: 0.55,
 } as const
 

@@ -1,5 +1,6 @@
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 
+import { isFrontSquatStanding } from '@/features/exercise-session/model/analyzers/squatFrontAnalyzer'
 import {
   angleAt,
   meanVisibility,
@@ -117,19 +118,7 @@ export const isCalibrationPoseOk = (
   if (kind === 'squat') {
     if (squatView === 'front') {
       if (!isSquatFrontVisible(lm)) return false
-      const lHip = toPoint2(lm[SQUAT_IDX.L_HIP])
-      const lKnee = toPoint2(lm[SQUAT_IDX.L_KNEE])
-      const lAnk = toPoint2(lm[SQUAT_IDX.L_ANK])
-      const leftAngle = angleAt(lHip, lKnee, lAnk)
-      const rHip = toPoint2(lm[SQUAT_IDX.R_HIP])
-      const rKnee = toPoint2(lm[SQUAT_IDX.R_KNEE])
-      const rAnk = toPoint2(lm[SQUAT_IDX.R_ANK])
-      const rightAngle = angleAt(rHip, rKnee, rAnk)
-      const kneeAngle = leftAngle !== null && rightAngle !== null
-        ? Math.max(leftAngle, rightAngle)
-        : leftAngle ?? rightAngle
-      if (kneeAngle === null) return false
-      return kneeAngle >= t.kneeStandDeg - 6
+      return isFrontSquatStanding(lm, t)
     }
 
     const side = pickSquatSide(lm)

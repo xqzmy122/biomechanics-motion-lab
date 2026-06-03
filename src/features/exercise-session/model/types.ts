@@ -29,6 +29,7 @@ export interface ISessionHud {
   torsoLeanDeg: number | null
   bodyLineDevDeg: number | null
   torsoShiftNorm: number | null
+  hipDropNorm: number | null
   runtimeSec: number
 }
 
@@ -44,6 +45,12 @@ export interface ISquatState {
   phase: ISquatPhase
   reps: number
   sawBottomThisRep: boolean
+}
+
+export interface ISquatFrontState extends ISquatState {
+  baselineHipY: number | null
+  baselineThighAngleDeg: number | null
+  bodyScale: number | null
 }
 
 export type IPushupPhase = 'top' | 'bottom'

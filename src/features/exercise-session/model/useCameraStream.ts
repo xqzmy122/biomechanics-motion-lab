@@ -38,6 +38,7 @@ const acquireStream = async (
   const attempts: MediaStreamConstraints[] =
     preference === 'user'
       ? [
+          { video: { facingMode: { exact: 'user' } }, audio: false },
           { video: { facingMode: { ideal: 'user' } }, audio: false },
           { video: true, audio: false },
         ]
@@ -61,6 +62,40 @@ const acquireStream = async (
   }
 
   throw lastError
+}
+
+const detectCameraCapabilities = async (): Promise<{
+  hasFrontCamera: boolean
+  hasBackCamera: boolean
+  canSwitchCamera: boolean
+}> => {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    return { hasFrontCamera: false, hasBackCamera: true, canSwitchCamera: false }
+  }
+
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    const videoInputs = devices.filter((d) => d.kind === 'videoinput')
+
+    if (videoInputs.length === 0) {
+      return { hasFrontCamera: false, hasBackCamera: false, canSwitchCamera: false }
+    }
+
+    const hasFrontCamera = videoInputs.some((d) =>
+      /front|user|facetime|selfie|integrated/i.test(d.label),
+    )
+    const hasBackCamera = videoInputs.some((d) =>
+      /back|rear|environment|wide|tele/i.test(d.label),
+    )
+
+    return {
+      hasFrontCamera: hasFrontCamera || videoInputs.length > 1,
+      hasBackCamera: hasBackCamera || videoInputs.length > 0,
+      canSwitchCamera: videoInputs.length > 0,
+    }
+  } catch {
+    return { hasFrontCamera: false, hasBackCamera: true, canSwitchCamera: false }
+  }
 }
 
 export const markCameraGrantedInSession = () => {
@@ -90,7 +125,7 @@ const isCameraPermissionGranted = async (): Promise<boolean> => {
 }
 
 export interface IUseCameraStreamOptions {
-  facingPreference?: ICameraFacingPreference
+  initialFacing?: ICameraFacingPreference
   autoRequest?: boolean
 }
 
@@ -100,19 +135,27 @@ export interface IUseCameraStreamResult {
   facingUser: boolean
   isRequesting: boolean
   canUseCamera: boolean
+  hasFrontCamera: boolean
+  canSwitchCamera: boolean
   requestCamera: () => Promise<void>
+  switchToFrontCamera: () => Promise<void>
+  switchToBackCamera: () => Promise<void>
+  toggleCamera: () => Promise<void>
 }
 
 export const useCameraStream = (
   options: IUseCameraStreamOptions = {},
 ): IUseCameraStreamResult => {
-  const { facingPreference = 'environment', autoRequest = true } = options
+  const { initialFacing = 'environment', autoRequest = true } = options
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [facingUser, setFacingUser] = useState(false)
   const [isRequesting, setIsRequesting] = useState(false)
+  const [hasFrontCamera, setHasFrontCamera] = useState(false)
+  const [canSwitchCamera, setCanSwitchCamera] = useState(false)
   const streamRef = useRef<MediaStream | null>(null)
   const autoRequestedRef = useRef(false)
+  const facingPreferenceRef = useRef<ICameraFacingPreference>(initialFacing)
 
   const canUseCamera =
     typeof navigator !== 'undefined' &&
@@ -125,7 +168,13 @@ export const useCameraStream = (
     setStream(null)
   }, [])
 
-  const requestCamera = useCallback(async () => {
+  const refreshCameraCapabilities = useCallback(async () => {
+    const caps = await detectCameraCapabilities()
+    setHasFrontCamera(caps.hasFrontCamera)
+    setCanSwitchCamera(caps.canSwitchCamera)
+  }, [])
+
+  const openCamera = useCallback(async (preference: ICameraFacingPreference) => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setError('This browser does not support camera access.')
       return
@@ -140,19 +189,38 @@ export const useCameraStream = (
     setIsRequesting(true)
     setError(null)
     stopTracks()
+    facingPreferenceRef.current = preference
 
     try {
-      const { stream: next, facingUser: fu } = await acquireStream(facingPreference)
+      const { stream: next, facingUser: fu } = await acquireStream(preference)
       streamRef.current = next
       setStream(next)
       setFacingUser(fu)
       markCameraGrantedInSession()
+      await refreshCameraCapabilities()
     } catch (e) {
       setError(getUserMediaErrorMessage(e))
     } finally {
       setIsRequesting(false)
     }
-  }, [facingPreference, stopTracks])
+  }, [refreshCameraCapabilities, stopTracks])
+
+  const requestCamera = useCallback(async () => {
+    await openCamera(facingPreferenceRef.current)
+  }, [openCamera])
+
+  const switchToFrontCamera = useCallback(async () => {
+    await openCamera('user')
+  }, [openCamera])
+
+  const switchToBackCamera = useCallback(async () => {
+    await openCamera('environment')
+  }, [openCamera])
+
+  const toggleCamera = useCallback(async () => {
+    const next = facingUser ? 'environment' : 'user'
+    await openCamera(next)
+  }, [facingUser, openCamera])
 
   useEffect(() => {
     if (!autoRequest || !canUseCamera || stream || autoRequestedRef.current) return
@@ -182,6 +250,11 @@ export const useCameraStream = (
     facingUser,
     isRequesting,
     canUseCamera,
+    hasFrontCamera,
+    canSwitchCamera,
     requestCamera,
+    switchToFrontCamera,
+    switchToBackCamera,
+    toggleCamera,
   }
 }

@@ -16,6 +16,11 @@ export interface IExerciseThresholds {
   elbowFlareRatio: number
   valgusMaxNorm: number
   torsoShiftMaxNorm: number
+  frontHipDropEccentricNorm: number
+  frontHipDropBottomNorm: number
+  frontHipDropStandNorm: number
+  frontThighAngleEccentricDeg: number
+  frontThighAngleBottomDeg: number
   smoothingAlpha: number
 }
 

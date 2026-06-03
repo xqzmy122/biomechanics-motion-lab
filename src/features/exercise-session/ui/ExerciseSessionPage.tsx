@@ -1,5 +1,5 @@
 import { motion } from 'motion/react'
-import { ArrowLeft, Loader2, Square, Video } from 'lucide-react'
+import { ArrowLeft, Loader2, Square, SwitchCamera, Video } from 'lucide-react'
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -35,6 +35,8 @@ import type {
   IFeedbackEvent,
   IFeedbackEventId,
   ISessionHud,
+  ISquatFrontState,
+  ISquatState,
 } from '@/features/exercise-session/model/types'
 import { useCameraStream } from '@/features/exercise-session/model/useCameraStream'
 import { usePoseLandmarker } from '@/features/exercise-session/model/usePoseLandmarker'
@@ -71,6 +73,7 @@ const buildInitialHud = (): ISessionHud => ({
   torsoLeanDeg: null,
   bodyLineDevDeg: null,
   torsoShiftNorm: null,
+  hipDropNorm: null,
   runtimeSec: 0,
 })
 
@@ -97,15 +100,19 @@ export const ExerciseSessionPage = () => {
     facingUser,
     isRequesting: isCameraRequesting,
     canUseCamera,
+    hasFrontCamera,
+    canSwitchCamera,
     requestCamera,
-  } = useCameraStream({ facingPreference })
+    switchToFrontCamera,
+    toggleCamera,
+  } = useCameraStream({ initialFacing: facingPreference })
   const { ready: poseReady, error: poseError, detectForVideo } =
     usePoseLandmarker()
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const smoothedRef = useRef<NormalizedLandmark[] | null>(null)
-  const squatStateRef = useRef(createInitialSquatState())
+  const squatStateRef = useRef<ISquatState | ISquatFrontState>(createInitialSquatState())
   const pushupStateRef = useRef(createInitialPushupState())
   const lastRepsRef = useRef(0)
   const lastHudPushRef = useRef(0)
@@ -344,7 +351,7 @@ export const ExerciseSessionPage = () => {
             if (squatCameraView === 'front') {
               const { state, out } = analyzeSquatFrontFrame(
                 lm,
-                squatStateRef.current,
+                squatStateRef.current as ISquatFrontState,
                 exercise.thresholds,
               )
               squatStateRef.current = state
@@ -354,7 +361,7 @@ export const ExerciseSessionPage = () => {
             } else {
               const { state, out } = analyzeSquatFrame(
                 lm,
-                squatStateRef.current,
+                squatStateRef.current as ISquatState,
                 exercise.thresholds,
               )
               squatStateRef.current = state
@@ -414,8 +421,9 @@ export const ExerciseSessionPage = () => {
             elbowAngleDeg: outPartial.elbowAngleDeg ?? null,
             torsoLeanDeg: outPartial.torsoLeanDeg ?? null,
             bodyLineDevDeg: outPartial.bodyLineDevDeg ?? null,
-            torsoShiftNorm: outPartial.torsoShiftNorm ?? null,
-            runtimeSec,
+              torsoShiftNorm: outPartial.torsoShiftNorm ?? null,
+              hipDropNorm: outPartial.hipDropNorm ?? null,
+              runtimeSec,
           }
 
           hudRef.current = nextHud
@@ -514,6 +522,23 @@ export const ExerciseSessionPage = () => {
     void requestCamera()
   }
 
+  const handleSwitchCameraClick = () => {
+    if (facingUser) {
+      void toggleCamera()
+      return
+    }
+    if (hasFrontCamera) {
+      void switchToFrontCamera()
+      return
+    }
+    void toggleCamera()
+  }
+
+  const showCameraSwitch =
+    Boolean(stream) &&
+    canSwitchCamera &&
+    sessionPhase !== 'countdown'
+
   const blockingOverlay =
     isInsecure ||
     showCameraUnsupported ||
@@ -555,16 +580,36 @@ export const ExerciseSessionPage = () => {
               Back
             </Link>
           </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            className="gap-2"
-            onClick={handleStop}
-          >
-            <Square className="size-3.5 fill-current" aria-hidden />
-            Stop
-          </Button>
+          <div className="flex items-center gap-2">
+            {showCameraSwitch ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="gap-2"
+                onClick={handleSwitchCameraClick}
+                disabled={isCameraRequesting}
+                aria-label={
+                  facingUser
+                    ? 'Switch to back camera'
+                    : 'Switch to front camera'
+                }
+              >
+                <SwitchCamera className="size-4" aria-hidden />
+                {facingUser ? 'Back cam' : 'Front cam'}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              className="gap-2"
+              onClick={handleStop}
+            >
+              <Square className="size-3.5 fill-current" aria-hidden />
+              Stop
+            </Button>
+          </div>
         </div>
 
         <motion.div
@@ -766,12 +811,21 @@ export const ExerciseSessionPage = () => {
       <div className="pointer-events-none absolute inset-x-0 bottom-28 mx-auto max-w-xl px-4 text-center text-sm text-white/90 drop-shadow-md">
         {exercise.analyzerKind === 'squat' && sessionPhase === 'active' ? (
           <p>
-            Knee angle:{' '}
-            <span className="font-mono tabular-nums">
-              {hud.kneeAngleDeg === null ? '—' : `${Math.round(hud.kneeAngleDeg)}°`}
-            </span>
             {isSquatFront ? (
               <>
+                Hip drop:{' '}
+                <span className="font-mono tabular-nums">
+                  {hud.hipDropNorm === null
+                    ? '—'
+                    : `${Math.round(hud.hipDropNorm * 100)}%`}
+                </span>
+                {' · '}
+                Thigh angle:{' '}
+                <span className="font-mono tabular-nums">
+                  {hud.kneeAngleDeg === null
+                    ? '—'
+                    : `${Math.round(hud.kneeAngleDeg)}°`}
+                </span>
                 {' · '}
                 Torso shift:{' '}
                 <span className="font-mono tabular-nums">
@@ -782,6 +836,10 @@ export const ExerciseSessionPage = () => {
               </>
             ) : (
               <>
+                Knee angle:{' '}
+                <span className="font-mono tabular-nums">
+                  {hud.kneeAngleDeg === null ? '—' : `${Math.round(hud.kneeAngleDeg)}°`}
+                </span>
                 {' · '}
                 Torso vs vertical:{' '}
                 <span className="font-mono tabular-nums">
