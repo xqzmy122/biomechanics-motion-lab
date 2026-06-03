@@ -10,9 +10,10 @@ export type IFeedbackEventId =
   | 'TORSO_LEAN'
   | 'DEPTH_OK'
   | 'DEPTH_SHALLOW'
+  | 'KNEE_VALGUS'
+  | 'TORSO_SHIFT'
   | 'BODY_LINE_BREAK'
   | 'ELBOW_FLARE'
-  | 'POSTURE_REMINDER'
 
 export interface IFeedbackEvent {
   id: IFeedbackEventId
@@ -27,7 +28,7 @@ export interface ISessionHud {
   elbowAngleDeg: number | null
   torsoLeanDeg: number | null
   bodyLineDevDeg: number | null
-  badFrameFraction: number | null
+  torsoShiftNorm: number | null
   runtimeSec: number
 }
 
@@ -51,10 +52,4 @@ export interface IPushupState {
   phase: IPushupPhase
   reps: number
   sawBottomThisRep: boolean
-}
-
-export interface IPostureState {
-  windowFlags: boolean[]
-  windowMaxLen: number
-  lastReminderAtMs: number
 }

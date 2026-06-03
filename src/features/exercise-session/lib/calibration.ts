@@ -5,8 +5,7 @@ import {
   meanVisibility,
   toPoint2,
 } from '@/features/exercise-session/lib/geometry'
-import { evaluateDeskPostureCalibration } from '@/features/exercise-session/lib/postureQuality'
-import type { IAnalyzerKind, IExerciseThresholds } from '@/shared/types/exercise'
+import type { IAnalyzerKind, IExerciseThresholds, ISquatCameraView } from '@/shared/types/exercise'
 
 const SQUAT_IDX = {
   L_HIP: 23,
@@ -88,8 +87,22 @@ const pickPushSide = (lm: NormalizedLandmark[]) => {
 
 const MIN_VIS = 0.32
 
+const FRONT_SQUAT_IDX = [
+  SQUAT_IDX.L_SH,
+  SQUAT_IDX.R_SH,
+  SQUAT_IDX.L_HIP,
+  SQUAT_IDX.R_HIP,
+  SQUAT_IDX.L_KNEE,
+  SQUAT_IDX.R_KNEE,
+  SQUAT_IDX.L_ANK,
+  SQUAT_IDX.R_ANK,
+] as const
+
 const isSquatSideVisible = (lm: NormalizedLandmark[], side: ReturnType<typeof pickSquatSide>) =>
   meanVisibility(lm, [side.hip, side.knee, side.ankle, side.shoulder]) >= MIN_VIS
+
+const isSquatFrontVisible = (lm: NormalizedLandmark[]) =>
+  meanVisibility(lm, [...FRONT_SQUAT_IDX]) >= MIN_VIS
 
 const isPushSideVisible = (lm: NormalizedLandmark[], side: ReturnType<typeof pickPushSide>) =>
   meanVisibility(lm, [side.shoulder, side.elbow, side.wrist, side.hip, side.knee]) >=
@@ -99,8 +112,26 @@ export const isCalibrationPoseOk = (
   kind: IAnalyzerKind,
   lm: NormalizedLandmark[],
   t: IExerciseThresholds,
+  squatView: ISquatCameraView = 'side',
 ): boolean => {
   if (kind === 'squat') {
+    if (squatView === 'front') {
+      if (!isSquatFrontVisible(lm)) return false
+      const lHip = toPoint2(lm[SQUAT_IDX.L_HIP])
+      const lKnee = toPoint2(lm[SQUAT_IDX.L_KNEE])
+      const lAnk = toPoint2(lm[SQUAT_IDX.L_ANK])
+      const leftAngle = angleAt(lHip, lKnee, lAnk)
+      const rHip = toPoint2(lm[SQUAT_IDX.R_HIP])
+      const rKnee = toPoint2(lm[SQUAT_IDX.R_KNEE])
+      const rAnk = toPoint2(lm[SQUAT_IDX.R_ANK])
+      const rightAngle = angleAt(rHip, rKnee, rAnk)
+      const kneeAngle = leftAngle !== null && rightAngle !== null
+        ? Math.max(leftAngle, rightAngle)
+        : leftAngle ?? rightAngle
+      if (kneeAngle === null) return false
+      return kneeAngle >= t.kneeStandDeg - 6
+    }
+
     const side = pickSquatSide(lm)
     if (!isSquatSideVisible(lm, side)) return false
     const hip = toPoint2(lm[side.hip])
@@ -111,48 +142,38 @@ export const isCalibrationPoseOk = (
     return kneeAngle >= t.kneeStandDeg - 6
   }
 
-  if (kind === 'pushup') {
-    const side = pickPushSide(lm)
-    if (!isPushSideVisible(lm, side)) return false
-    const sh = toPoint2(lm[side.shoulder])
-    const el = toPoint2(lm[side.elbow])
-    const wr = toPoint2(lm[side.wrist])
-    const elbowAngle = angleAt(sh, el, wr)
-    if (elbowAngle === null) return false
-    const hipL = toPoint2(lm[PUSH_IDX.L_HIP])
-    const hipR = toPoint2(lm[PUSH_IDX.R_HIP])
-    const kneeL = toPoint2(lm[PUSH_IDX.L_KNEE])
-    const kneeR = toPoint2(lm[PUSH_IDX.R_KNEE])
-    const hip = { x: (hipL.x + hipR.x) / 2, y: (hipL.y + hipR.y) / 2 }
-    const knee = { x: (kneeL.x + kneeR.x) / 2, y: (kneeL.y + kneeR.y) / 2 }
-    const shoulderMid = {
-      x: (toPoint2(lm[PUSH_IDX.L_SH]).x + toPoint2(lm[PUSH_IDX.R_SH]).x) / 2,
-      y: (toPoint2(lm[PUSH_IDX.L_SH]).y + toPoint2(lm[PUSH_IDX.R_SH]).y) / 2,
-    }
-    const lineAngle = angleAt(shoulderMid, hip, knee)
-    const bodyLineDeg = lineAngle === null ? 999 : Math.abs(180 - lineAngle)
-    return elbowAngle >= t.elbowTopDeg - 12 && bodyLineDeg <= t.bodyLineMaxDeg + 12
+  const side = pickPushSide(lm)
+  if (!isPushSideVisible(lm, side)) return false
+  const sh = toPoint2(lm[side.shoulder])
+  const el = toPoint2(lm[side.elbow])
+  const wr = toPoint2(lm[side.wrist])
+  const elbowAngle = angleAt(sh, el, wr)
+  if (elbowAngle === null) return false
+  const hipL = toPoint2(lm[PUSH_IDX.L_HIP])
+  const hipR = toPoint2(lm[PUSH_IDX.R_HIP])
+  const kneeL = toPoint2(lm[PUSH_IDX.L_KNEE])
+  const kneeR = toPoint2(lm[PUSH_IDX.R_KNEE])
+  const hip = { x: (hipL.x + hipR.x) / 2, y: (hipL.y + hipR.y) / 2 }
+  const knee = { x: (kneeL.x + kneeR.x) / 2, y: (kneeL.y + kneeR.y) / 2 }
+  const shoulderMid = {
+    x: (toPoint2(lm[PUSH_IDX.L_SH]).x + toPoint2(lm[PUSH_IDX.R_SH]).x) / 2,
+    y: (toPoint2(lm[PUSH_IDX.L_SH]).y + toPoint2(lm[PUSH_IDX.R_SH]).y) / 2,
   }
-
-  const q = evaluateDeskPostureCalibration(lm, t)
-  if (q === null || q.good === null) return false
-  return q.good
+  const lineAngle = angleAt(shoulderMid, hip, knee)
+  const bodyLineDeg = lineAngle === null ? 999 : Math.abs(180 - lineAngle)
+  return elbowAngle >= t.elbowTopDeg - 12 && bodyLineDeg <= t.bodyLineMaxDeg + 12
 }
-
-/** True when person / key joints are missing — calibration bar should reset */
-const POSTURE_VISIBILITY_IDX = [0, 7, 8, 11, 12] as const
 
 export const isCalibrationVisible = (
   kind: IAnalyzerKind,
   lm: NormalizedLandmark[],
+  squatView: ISquatCameraView = 'side',
 ): boolean => {
   if (kind === 'squat') {
+    if (squatView === 'front') return isSquatFrontVisible(lm)
     const side = pickSquatSide(lm)
     return isSquatSideVisible(lm, side)
   }
-  if (kind === 'pushup') {
-    const side = pickPushSide(lm)
-    return isPushSideVisible(lm, side)
-  }
-  return meanVisibility(lm, [...POSTURE_VISIBILITY_IDX]) >= 0.24
+  const side = pickPushSide(lm)
+  return isPushSideVisible(lm, side)
 }

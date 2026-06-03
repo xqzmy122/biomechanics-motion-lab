@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+const CAMERA_SESSION_KEY = 'biolab-camera-granted'
+
 const getUserMediaErrorMessage = (e: unknown): string => {
   if (e instanceof DOMException) {
     if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
@@ -22,30 +24,74 @@ const getUserMediaErrorMessage = (e: unknown): string => {
   return 'Could not open the camera.'
 }
 
+export type ICameraFacingPreference = 'environment' | 'user' | 'any'
+
 const tryGetStream = async (
   constraints: MediaStreamConstraints,
 ): Promise<MediaStream> => {
   return navigator.mediaDevices.getUserMedia(constraints)
 }
 
-const acquireBestStream = async (): Promise<{
-  stream: MediaStream
-  facingUser: boolean
-}> => {
-  try {
-    const stream = await tryGetStream({
-      video: { facingMode: { ideal: 'environment' } },
-      audio: false,
-    })
-    const track = stream.getVideoTracks()[0]
-    const settings = track?.getSettings() ?? {}
-    return { stream, facingUser: settings.facingMode === 'user' }
-  } catch {
-    const stream = await tryGetStream({ video: true, audio: false })
-    const track = stream.getVideoTracks()[0]
-    const settings = track?.getSettings() ?? {}
-    return { stream, facingUser: settings.facingMode === 'user' }
+const acquireStream = async (
+  preference: ICameraFacingPreference,
+): Promise<{ stream: MediaStream; facingUser: boolean }> => {
+  const attempts: MediaStreamConstraints[] =
+    preference === 'user'
+      ? [
+          { video: { facingMode: { ideal: 'user' } }, audio: false },
+          { video: true, audio: false },
+        ]
+      : preference === 'environment'
+        ? [
+            { video: { facingMode: { ideal: 'environment' } }, audio: false },
+            { video: true, audio: false },
+          ]
+        : [{ video: true, audio: false }]
+
+  let lastError: unknown
+  for (const constraints of attempts) {
+    try {
+      const stream = await tryGetStream(constraints)
+      const track = stream.getVideoTracks()[0]
+      const settings = track?.getSettings() ?? {}
+      return { stream, facingUser: settings.facingMode === 'user' }
+    } catch (e) {
+      lastError = e
+    }
   }
+
+  throw lastError
+}
+
+export const markCameraGrantedInSession = () => {
+  try {
+    sessionStorage.setItem(CAMERA_SESSION_KEY, '1')
+  } catch {
+    /* sessionStorage unavailable */
+  }
+}
+
+export const isCameraGrantedInSession = (): boolean => {
+  try {
+    return sessionStorage.getItem(CAMERA_SESSION_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+const isCameraPermissionGranted = async (): Promise<boolean> => {
+  if (!navigator.permissions?.query) return false
+  try {
+    const status = await navigator.permissions.query({ name: 'camera' as PermissionName })
+    return status.state === 'granted'
+  } catch {
+    return false
+  }
+}
+
+export interface IUseCameraStreamOptions {
+  facingPreference?: ICameraFacingPreference
+  autoRequest?: boolean
 }
 
 export interface IUseCameraStreamResult {
@@ -57,12 +103,16 @@ export interface IUseCameraStreamResult {
   requestCamera: () => Promise<void>
 }
 
-export const useCameraStream = (): IUseCameraStreamResult => {
+export const useCameraStream = (
+  options: IUseCameraStreamOptions = {},
+): IUseCameraStreamResult => {
+  const { facingPreference = 'environment', autoRequest = true } = options
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [facingUser, setFacingUser] = useState(false)
   const [isRequesting, setIsRequesting] = useState(false)
   const streamRef = useRef<MediaStream | null>(null)
+  const autoRequestedRef = useRef(false)
 
   const canUseCamera =
     typeof navigator !== 'undefined' &&
@@ -92,16 +142,33 @@ export const useCameraStream = (): IUseCameraStreamResult => {
     stopTracks()
 
     try {
-      const { stream: next, facingUser: fu } = await acquireBestStream()
+      const { stream: next, facingUser: fu } = await acquireStream(facingPreference)
       streamRef.current = next
       setStream(next)
       setFacingUser(fu)
+      markCameraGrantedInSession()
     } catch (e) {
       setError(getUserMediaErrorMessage(e))
     } finally {
       setIsRequesting(false)
     }
-  }, [stopTracks])
+  }, [facingPreference, stopTracks])
+
+  useEffect(() => {
+    if (!autoRequest || !canUseCamera || stream || autoRequestedRef.current) return
+
+    autoRequestedRef.current = true
+
+    const tryAutoRequest = async () => {
+      const sessionGranted = isCameraGrantedInSession()
+      const permGranted = await isCameraPermissionGranted()
+      if (sessionGranted || permGranted) {
+        await requestCamera()
+      }
+    }
+
+    void tryAutoRequest()
+  }, [autoRequest, canUseCamera, stream, requestCamera])
 
   useEffect(() => {
     return () => {

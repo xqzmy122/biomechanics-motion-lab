@@ -2,36 +2,32 @@ import { motion } from 'motion/react'
 import { ArrowLeft, Loader2, Square, Video } from 'lucide-react'
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { drawPoseOnCanvas } from '@/features/exercise-session/lib/drawPose'
 import {
   isCalibrationPoseOk,
   isCalibrationVisible,
 } from '@/features/exercise-session/lib/calibration'
-import { evaluateDeskPosture } from '@/features/exercise-session/lib/postureQuality'
-import { buildPostureIntervalsFromSamples } from '@/features/exercise-session/lib/postureIntervals'
 import {
   buildRepQualityRow,
+  pickPostRepPrompt,
   type IRepQualityRow,
 } from '@/features/exercise-session/lib/repQualityRow'
 import { smoothLandmarks } from '@/features/exercise-session/lib/smoothing'
-import {
-  analyzePostureFrame,
-  createInitialPostureState,
-} from '@/features/exercise-session/model/analyzers/postureAnalyzer'
 import {
   analyzePushupFrame,
   createInitialPushupState,
 } from '@/features/exercise-session/model/analyzers/pushupAnalyzer'
 import {
+  analyzeSquatFrontFrame,
+  createInitialSquatFrontState,
+} from '@/features/exercise-session/model/analyzers/squatFrontAnalyzer'
+import {
   analyzeSquatFrame,
   createInitialSquatState,
 } from '@/features/exercise-session/model/analyzers/squatAnalyzer'
-import { POSTURE_MEASUREMENT_DESCRIPTION } from '@/features/exercise-session/model/sessionCopy'
 import {
-  POSTURE_SAMPLE_INTERVAL_MS,
-  POSTURE_SESSION_MS,
   SESSION_CALIBRATION_HOLD_MS,
   SESSION_COUNTDOWN_MS,
 } from '@/features/exercise-session/model/sessionConstants'
@@ -49,6 +45,7 @@ import {
   type ISessionSummary,
 } from '@/features/exercise-session/ui/SessionSummaryDialog'
 import { getExerciseById } from '@/shared/config/exercises'
+import type { ISquatCameraView } from '@/shared/types/exercise'
 import { Alert, AlertDescription, AlertTitle } from '@/shared/ui/alert'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -63,6 +60,9 @@ import { Progress } from '@/shared/ui/progress'
 
 type ISessionPhase = 'countdown' | 'calibrating' | 'active'
 
+const parseSquatView = (value: string | null): ISquatCameraView =>
+  value === 'front' ? 'front' : 'side'
+
 const buildInitialHud = (): ISessionHud => ({
   reps: 0,
   phaseLabel: 'prep',
@@ -70,18 +70,26 @@ const buildInitialHud = (): ISessionHud => ({
   elbowAngleDeg: null,
   torsoLeanDeg: null,
   bodyLineDevDeg: null,
-  badFrameFraction: null,
+  torsoShiftNorm: null,
   runtimeSec: 0,
 })
 
 export const ExerciseSessionPage = () => {
   const { exerciseId } = useParams()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+
+  const squatView = parseSquatView(searchParams.get('view'))
 
   const exercise = useMemo(() => {
     if (!exerciseId) return undefined
     return getExerciseById(exerciseId)
   }, [exerciseId])
+
+  const facingPreference =
+    exercise?.analyzerKind === 'squat' && squatView === 'front'
+      ? 'user'
+      : 'environment'
 
   const {
     stream,
@@ -90,7 +98,7 @@ export const ExerciseSessionPage = () => {
     isRequesting: isCameraRequesting,
     canUseCamera,
     requestCamera,
-  } = useCameraStream()
+  } = useCameraStream({ facingPreference })
   const { ready: poseReady, error: poseError, detectForVideo } =
     usePoseLandmarker()
 
@@ -99,16 +107,12 @@ export const ExerciseSessionPage = () => {
   const smoothedRef = useRef<NormalizedLandmark[] | null>(null)
   const squatStateRef = useRef(createInitialSquatState())
   const pushupStateRef = useRef(createInitialPushupState())
-  const postureStateRef = useRef(
-    createInitialPostureState(getExerciseById('posture')!.thresholds),
-  )
   const lastRepsRef = useRef(0)
   const lastHudPushRef = useRef(0)
   const workoutStartRef = useRef<number | null>(null)
   const commentsRef = useRef(new Set<string>())
   const repFeedbackByIdRef = useRef(new Map<IFeedbackEventId, string>())
   const repQualityRowsRef = useRef<IRepQualityRow[]>([])
-  const lastLivePromptAttemptBucketRef = useRef(-1)
   const rvcHandleRef = useRef<number>(0)
   const loopActiveRef = useRef(false)
   const hudRef = useRef<ISessionHud>(buildInitialHud())
@@ -119,8 +123,6 @@ export const ExerciseSessionPage = () => {
   const lastFrameTsRef = useRef<number | null>(null)
   const lastCountdownIntRef = useRef(-1)
   const lastCalibUiRef = useRef(-1)
-  const postureSamplesRef = useRef<Array<{ tSec: number; good: boolean }>>([])
-  const lastPostureSampleTsRef = useRef(0)
   const finalizeSessionRef = useRef<() => void>(() => {})
 
   const [replayTick, setReplayTick] = useState(0)
@@ -131,7 +133,6 @@ export const ExerciseSessionPage = () => {
   const [sessionPhase, setSessionPhase] = useState<ISessionPhase>('countdown')
   const [countdownSec, setCountdownSec] = useState(10)
   const [calibrationProgress, setCalibrationProgress] = useState(0)
-  const [postureSessionProgress, setPostureSessionProgress] = useState(0)
 
   const pushPrompt = useCallback((ev: IPromptItem) => {
     setPrompts((prev) => [...prev.slice(-3), ev])
@@ -142,8 +143,10 @@ export const ExerciseSessionPage = () => {
 
   useEffect(() => {
     if (!exercise) return
-    postureStateRef.current = createInitialPostureState(exercise.thresholds)
-    squatStateRef.current = createInitialSquatState()
+    squatStateRef.current =
+      exercise.analyzerKind === 'squat' && squatView === 'front'
+        ? createInitialSquatFrontState()
+        : createInitialSquatState()
     pushupStateRef.current = createInitialPushupState()
     smoothedRef.current = null
     lastRepsRef.current = 0
@@ -151,14 +154,13 @@ export const ExerciseSessionPage = () => {
     commentsRef.current = new Set()
     repFeedbackByIdRef.current.clear()
     repQualityRowsRef.current = []
-    lastLivePromptAttemptBucketRef.current = -1
     const nextHud = buildInitialHud()
     hudRef.current = nextHud
     queueMicrotask(() => {
       setHud(nextHud)
       setPrompts([])
     })
-  }, [exercise, replayTick])
+  }, [exercise, squatView, replayTick])
 
   useEffect(() => {
     if (!stream || !poseReady || !exercise) return
@@ -169,18 +171,14 @@ export const ExerciseSessionPage = () => {
     lastCountdownIntRef.current = -1
     lastCalibUiRef.current = -1
     workoutStartRef.current = null
-    postureSamplesRef.current = []
-    lastPostureSampleTsRef.current = 0
     repQualityRowsRef.current = []
     repFeedbackByIdRef.current.clear()
-    lastLivePromptAttemptBucketRef.current = -1
     queueMicrotask(() => {
       setSessionPhase('countdown')
       setCountdownSec(10)
       setCalibrationProgress(0)
-      setPostureSessionProgress(0)
     })
-  }, [stream, poseReady, exercise, replayTick])
+  }, [stream, poseReady, exercise, squatView, replayTick])
 
   const finalizeSession = useCallback(() => {
     if (!exercise) return
@@ -194,48 +192,27 @@ export const ExerciseSessionPage = () => {
     const ws = workoutStartRef.current
     const rawDurationSec = ws === null ? 0 : Math.max(0, (end - ws) / 1000)
 
-    if (exercise.analyzerKind === 'posture') {
-      const samples = postureSamplesRef.current
-      const goodCt = samples.filter((s) => s.good).length
-      const scorePct = samples.length > 0 ? (goodCt / samples.length) * 100 : null
-      const intervals = buildPostureIntervalsFromSamples(samples)
-      setSummary({
-        exerciseTitle: exercise.title,
-        durationSec: Math.min(POSTURE_SESSION_MS / 1000, rawDurationSec),
-        reps: null,
-        postureBadFraction: null,
-        postureScorePercent: scorePct,
-        postureIntervals: intervals,
-        postureHowMeasured: POSTURE_MEASUREMENT_DESCRIPTION,
-        repQualityRows: null,
-        comments: [...commentsRef.current],
-      })
-    } else {
-      if (repFeedbackByIdRef.current.size > 0) {
-        const incompleteRep =
-          exercise.analyzerKind === 'squat'
-            ? squatStateRef.current.reps + 1
-            : pushupStateRef.current.reps + 1
-        repQualityRowsRef.current.push(
-          buildRepQualityRow(incompleteRep, repFeedbackByIdRef.current),
-        )
-        repFeedbackByIdRef.current.clear()
-      }
-      setSummary({
-        exerciseTitle: exercise.title,
-        durationSec: rawDurationSec,
-        reps: hudRef.current.reps,
-        postureBadFraction: null,
-        postureScorePercent: null,
-        postureIntervals: null,
-        postureHowMeasured: null,
-        repQualityRows:
-          repQualityRowsRef.current.length > 0
-            ? [...repQualityRowsRef.current]
-            : null,
-        comments: [...commentsRef.current],
-      })
+    if (repFeedbackByIdRef.current.size > 0) {
+      const incompleteRep =
+        exercise.analyzerKind === 'squat'
+          ? squatStateRef.current.reps + 1
+          : pushupStateRef.current.reps + 1
+      repQualityRowsRef.current.push(
+        buildRepQualityRow(incompleteRep, repFeedbackByIdRef.current),
+      )
+      repFeedbackByIdRef.current.clear()
     }
+
+    setSummary({
+      exerciseTitle: exercise.title,
+      durationSec: rawDurationSec,
+      reps: hudRef.current.reps,
+      repQualityRows:
+        repQualityRowsRef.current.length > 0
+          ? [...repQualityRowsRef.current]
+          : null,
+      comments: [...commentsRef.current],
+    })
     setSummaryOpen(true)
   }, [exercise])
 
@@ -283,6 +260,8 @@ export const ExerciseSessionPage = () => {
         const lm = smoothedRef.current
 
         const phase = sessionPhaseRef.current
+        const squatCameraView =
+          exercise.analyzerKind === 'squat' ? squatView : 'side'
 
         if (phase === 'countdown') {
           if (countdownStartRef.current === null) {
@@ -306,11 +285,16 @@ export const ExerciseSessionPage = () => {
             }
           }
         } else if (phase === 'calibrating') {
-          const visible = isCalibrationVisible(exercise.analyzerKind, lm)
+          const visible = isCalibrationVisible(
+            exercise.analyzerKind,
+            lm,
+            squatCameraView,
+          )
           const poseOk = isCalibrationPoseOk(
             exercise.analyzerKind,
             lm,
             exercise.thresholds,
+            squatCameraView,
           )
           if (visible && poseOk) {
             calibrationHoldMsRef.current += deltaMs
@@ -331,81 +315,34 @@ export const ExerciseSessionPage = () => {
             sessionPhaseRef.current = 'active'
             setSessionPhase('active')
             workoutStartRef.current = detectTs
-            squatStateRef.current = createInitialSquatState()
+            squatStateRef.current =
+              squatCameraView === 'front'
+                ? createInitialSquatFrontState()
+                : createInitialSquatState()
             pushupStateRef.current = createInitialPushupState()
-            postureStateRef.current = createInitialPostureState(
-              exercise.thresholds,
-            )
             lastRepsRef.current = 0
-            postureSamplesRef.current = []
-            lastPostureSampleTsRef.current = detectTs
             calibrationHoldMsRef.current = 0
             lastCalibUiRef.current = -1
             repQualityRowsRef.current = []
             repFeedbackByIdRef.current.clear()
-            lastLivePromptAttemptBucketRef.current = -1
             setCalibrationProgress(100)
           }
         } else if (phase === 'active') {
           const ws = workoutStartRef.current ?? detectTs
           const runtimeSec = (detectTs - ws) / 1000
 
-          if (exercise.analyzerKind === 'posture') {
-            if (detectTs - ws >= POSTURE_SESSION_MS) {
-              finalizeSessionRef.current()
-              return
-            }
-            const prog = Math.min(
-              100,
-              Math.round(((detectTs - ws) / POSTURE_SESSION_MS) * 100),
-            )
-            setPostureSessionProgress(prog)
+          const events: IFeedbackEvent[] = []
+          const comments: string[] = []
 
-            if (detectTs - lastPostureSampleTsRef.current >= POSTURE_SAMPLE_INTERVAL_MS) {
-              lastPostureSampleTsRef.current = detectTs
-              const q = evaluateDeskPosture(lm, exercise.thresholds)
-              if (q !== null && q.good !== null) {
-                postureSamplesRef.current.push({
-                  tSec: (detectTs - ws) / 1000,
-                  good: q.good,
-                })
-              }
-            }
+          const repsBefore =
+            exercise.analyzerKind === 'squat'
+              ? squatStateRef.current.reps
+              : pushupStateRef.current.reps
 
-            const { state, out } = analyzePostureFrame(
-              lm,
-              postureStateRef.current,
-              detectTs,
-              exercise.thresholds,
-            )
-            postureStateRef.current = state
-            const nextHud: ISessionHud = {
-              reps: 0,
-              phaseLabel: 'monitor',
-              kneeAngleDeg: null,
-              elbowAngleDeg: null,
-              torsoLeanDeg: null,
-              bodyLineDevDeg: null,
-              badFrameFraction: out.hud.badFrameFraction ?? null,
-              runtimeSec,
-            }
-            hudRef.current = nextHud
-            if (detectTs - lastHudPushRef.current > 120) {
-              lastHudPushRef.current = detectTs
-              setHud(nextHud)
-            }
-          } else {
-            const events: IFeedbackEvent[] = []
-            const comments: string[] = []
-
-            const repsBefore =
-              exercise.analyzerKind === 'squat'
-                ? squatStateRef.current.reps
-                : pushupStateRef.current.reps
-
-            let outPartial: Partial<ISessionHud>
-            if (exercise.analyzerKind === 'squat') {
-              const { state, out } = analyzeSquatFrame(
+          let outPartial: Partial<ISessionHud>
+          if (exercise.analyzerKind === 'squat') {
+            if (squatCameraView === 'front') {
+              const { state, out } = analyzeSquatFrontFrame(
                 lm,
                 squatStateRef.current,
                 exercise.thresholds,
@@ -415,84 +352,84 @@ export const ExerciseSessionPage = () => {
               events.push(...out.events)
               comments.push(...out.comments)
             } else {
-              const { state, out } = analyzePushupFrame(
+              const { state, out } = analyzeSquatFrame(
                 lm,
-                pushupStateRef.current,
+                squatStateRef.current,
                 exercise.thresholds,
               )
-              pushupStateRef.current = state
+              squatStateRef.current = state
               outPartial = out.hud
               events.push(...out.events)
               comments.push(...out.comments)
             }
+          } else {
+            const { state, out } = analyzePushupFrame(
+              lm,
+              pushupStateRef.current,
+              exercise.thresholds,
+            )
+            pushupStateRef.current = state
+            outPartial = out.hud
+            events.push(...out.events)
+            comments.push(...out.comments)
+          }
 
-            for (const c of comments) {
-              commentsRef.current.add(c)
+          for (const c of comments) {
+            commentsRef.current.add(c)
+          }
+
+          for (const ev of events) {
+            repFeedbackByIdRef.current.set(ev.id, ev.message)
+          }
+
+          const repsAfter =
+            exercise.analyzerKind === 'squat'
+              ? squatStateRef.current.reps
+              : pushupStateRef.current.reps
+
+          if (repsAfter > repsBefore) {
+            const completedFeedback = new Map(repFeedbackByIdRef.current)
+            repQualityRowsRef.current.push(
+              buildRepQualityRow(repsAfter, completedFeedback),
+            )
+
+            const postRepPrompt = pickPostRepPrompt(completedFeedback)
+            if (postRepPrompt) {
+              const key = `${postRepPrompt.id}-rep-${repsAfter}`
+              pushPrompt({ ...postRepPrompt, key })
             }
 
-            for (const ev of events) {
-              repFeedbackByIdRef.current.set(ev.id, ev.message)
-            }
+            repFeedbackByIdRef.current.clear()
+          }
 
-            const repsAfter =
-              exercise.analyzerKind === 'squat'
-                ? squatStateRef.current.reps
-                : pushupStateRef.current.reps
+          const reps =
+            exercise.analyzerKind === 'squat'
+              ? squatStateRef.current.reps
+              : pushupStateRef.current.reps
 
-            if (repsAfter > repsBefore) {
-              repQualityRowsRef.current.push(
-                buildRepQualityRow(repsAfter, repFeedbackByIdRef.current),
-              )
-              repFeedbackByIdRef.current.clear()
-            }
+          const nextHud: ISessionHud = {
+            reps,
+            phaseLabel: outPartial.phaseLabel ?? '—',
+            kneeAngleDeg: outPartial.kneeAngleDeg ?? null,
+            elbowAngleDeg: outPartial.elbowAngleDeg ?? null,
+            torsoLeanDeg: outPartial.torsoLeanDeg ?? null,
+            bodyLineDevDeg: outPartial.bodyLineDevDeg ?? null,
+            torsoShiftNorm: outPartial.torsoShiftNorm ?? null,
+            runtimeSec,
+          }
 
-            if (events.length > 0) {
-              const attemptBucket = repsBefore
-              if (lastLivePromptAttemptBucketRef.current !== attemptBucket) {
-                const severityRank = (s: IFeedbackEvent['severity']) =>
-                  s === 'warning' ? 0 : s === 'info' ? 1 : 2
-                const sorted = [...events].sort(
-                  (a, b) => severityRank(a.severity) - severityRank(b.severity),
-                )
-                const chosen =
-                  sorted.find((e) => e.severity !== 'success') ?? sorted[0]
-                if (chosen) {
-                  const key = `${chosen.id}-${Math.round(detectTs)}`
-                  pushPrompt({ ...chosen, key })
-                  lastLivePromptAttemptBucketRef.current = attemptBucket
-                }
-              }
-            }
+          hudRef.current = nextHud
 
-            const reps =
-              exercise.analyzerKind === 'squat'
-                ? squatStateRef.current.reps
-                : pushupStateRef.current.reps
+          const repsChanged = nextHud.reps !== lastRepsRef.current
+          if (repsChanged) {
+            lastRepsRef.current = nextHud.reps
+          }
 
-            const nextHud: ISessionHud = {
-              reps,
-              phaseLabel: outPartial.phaseLabel ?? '—',
-              kneeAngleDeg: outPartial.kneeAngleDeg ?? null,
-              elbowAngleDeg: outPartial.elbowAngleDeg ?? null,
-              torsoLeanDeg: outPartial.torsoLeanDeg ?? null,
-              bodyLineDevDeg: outPartial.bodyLineDevDeg ?? null,
-              badFrameFraction: null,
-              runtimeSec,
-            }
-
-            hudRef.current = nextHud
-
-            const repsChanged = nextHud.reps !== lastRepsRef.current
-            if (repsChanged) {
-              lastRepsRef.current = nextHud.reps
-            }
-
-            const shouldPushHud =
-              repsChanged || detectTs - lastHudPushRef.current > 90
-            if (shouldPushHud) {
-              lastHudPushRef.current = detectTs
-              setHud(nextHud)
-            }
+          const shouldPushHud =
+            repsChanged || detectTs - lastHudPushRef.current > 90
+          if (shouldPushHud) {
+            lastHudPushRef.current = detectTs
+            setHud(nextHud)
           }
         }
       }
@@ -534,6 +471,7 @@ export const ExerciseSessionPage = () => {
     stream,
     poseReady,
     facingUser,
+    squatView,
     detectForVideo,
     pushPrompt,
     replayTick,
@@ -568,7 +506,7 @@ export const ExerciseSessionPage = () => {
     typeof window !== 'undefined' && !window.isSecureContext
   const showPoseError = Boolean(stream && poseError)
   const showPoseLoading = Boolean(stream && !poseReady && !poseError)
-  const showCameraGate = !isInsecure && canUseCamera && !stream
+  const showCameraGate = !isInsecure && canUseCamera && !stream && !isCameraRequesting
   const showCameraUnsupported =
     !isInsecure && !canUseCamera && typeof window !== 'undefined'
 
@@ -589,6 +527,8 @@ export const ExerciseSessionPage = () => {
     (sessionPhase === 'countdown' || sessionPhase === 'calibrating')
 
   const showHudTimer = sessionPhase === 'active'
+  const isSquatFront =
+    exercise.analyzerKind === 'squat' && squatView === 'front'
 
   return (
     <div className="relative min-h-svh bg-black text-foreground">
@@ -607,7 +547,10 @@ export const ExerciseSessionPage = () => {
       <div className="pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-black/70 to-transparent pb-16 pt-4">
         <div className="pointer-events-auto mx-auto flex max-w-3xl items-start justify-between gap-3 px-4">
           <Button variant="secondary" size="sm" className="gap-2" asChild>
-            <Link to={`/exercise/${exercise.id}`} aria-label="Back to exercise">
+            <Link
+              to={`/exercise/${exercise.id}`}
+              aria-label="Back to exercise"
+            >
               <ArrowLeft className="size-4" />
               Back
             </Link>
@@ -633,6 +576,11 @@ export const ExerciseSessionPage = () => {
           <Badge variant="secondary" className="backdrop-blur">
             {exercise.title}
           </Badge>
+          {exercise.analyzerKind === 'squat' ? (
+            <Badge variant="outline" className="border-white/20 bg-black/40 text-white backdrop-blur">
+              {isSquatFront ? 'Front view' : 'Side view'}
+            </Badge>
+          ) : null}
           <Badge variant="outline" className="border-white/20 bg-black/40 text-white backdrop-blur">
             {showHudTimer ? (
               <>
@@ -648,11 +596,9 @@ export const ExerciseSessionPage = () => {
               <span className="text-white/70">00:00</span>
             )}
           </Badge>
-          {exercise.analyzerKind === 'posture' ? null : (
-            <Badge className="bg-white/90 text-black backdrop-blur">
-              Reps: {sessionPhase === 'active' ? hud.reps : 0}
-            </Badge>
-          )}
+          <Badge className="bg-white/90 text-black backdrop-blur">
+            Reps: {sessionPhase === 'active' ? hud.reps : 0}
+          </Badge>
           <Badge variant="outline" className="border-white/20 bg-black/40 capitalize text-white backdrop-blur">
             {(() => {
               if (sessionPhase === 'countdown') return 'get ready'
@@ -661,17 +607,6 @@ export const ExerciseSessionPage = () => {
             })()}
           </Badge>
         </motion.div>
-
-        {exercise.analyzerKind === 'posture' &&
-        sessionPhase === 'active' ? (
-          <div className="pointer-events-none mx-auto mt-3 max-w-md px-4">
-            <p className="mb-1 text-xs text-white/80">Session (1 min)</p>
-            <Progress
-              value={postureSessionProgress}
-              className="h-2 border border-white/10 bg-black/50"
-            />
-          </div>
-        ) : null}
       </div>
 
       {prepBanner ? (
@@ -800,6 +735,13 @@ export const ExerciseSessionPage = () => {
               </Card>
             ) : null}
 
+            {isCameraRequesting && !showCameraGate ? (
+              <div className="flex flex-col items-center gap-3 text-center text-sm text-white">
+                <Loader2 className="size-8 animate-spin" aria-hidden />
+                <p>Starting camera…</p>
+              </div>
+            ) : null}
+
             {showPoseError ? (
               <Card className="border-white/15 bg-zinc-950/95 text-white shadow-xl backdrop-blur">
                 <CardHeader>
@@ -828,11 +770,25 @@ export const ExerciseSessionPage = () => {
             <span className="font-mono tabular-nums">
               {hud.kneeAngleDeg === null ? '—' : `${Math.round(hud.kneeAngleDeg)}°`}
             </span>
-            {' · '}
-            Torso vs vertical:{' '}
-            <span className="font-mono tabular-nums">
-              {hud.torsoLeanDeg === null ? '—' : `${Math.round(hud.torsoLeanDeg)}°`}
-            </span>
+            {isSquatFront ? (
+              <>
+                {' · '}
+                Torso shift:{' '}
+                <span className="font-mono tabular-nums">
+                  {hud.torsoShiftNorm === null
+                    ? '—'
+                    : `${(hud.torsoShiftNorm * 100).toFixed(0)}%`}
+                </span>
+              </>
+            ) : (
+              <>
+                {' · '}
+                Torso vs vertical:{' '}
+                <span className="font-mono tabular-nums">
+                  {hud.torsoLeanDeg === null ? '—' : `${Math.round(hud.torsoLeanDeg)}°`}
+                </span>
+              </>
+            )}
           </p>
         ) : null}
         {exercise.analyzerKind === 'pushup' && sessionPhase === 'active' ? (
@@ -846,12 +802,6 @@ export const ExerciseSessionPage = () => {
             <span className="font-mono tabular-nums">
               {hud.bodyLineDevDeg === null ? '—' : `${Math.round(hud.bodyLineDevDeg)}°`}
             </span>
-          </p>
-        ) : null}
-        {exercise.analyzerKind === 'posture' && sessionPhase === 'active' ? (
-          <p>
-            Live checks: head vs ears (horizontal) and shoulder height balance — see
-            summary for how this session was scored.
           </p>
         ) : null}
       </div>

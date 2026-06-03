@@ -10,11 +10,8 @@ const DEFAULT_THRESHOLDS = {
   depthHipBelowKneeEnabled: true,
   bodyLineMaxDeg: 18,
   elbowFlareRatio: 0.52,
-  headForwardMaxNorm: 0.062,
-  shoulderAsymmetryMaxNorm: 0.052,
-  postureWindowSec: 36,
-  postureBadFraction: 0.58,
-  postureReminderIntervalMin: 2,
+  valgusMaxNorm: 0.045,
+  torsoShiftMaxNorm: 0.055,
   smoothingAlpha: 0.55,
 } as const
 
@@ -23,9 +20,11 @@ export const EXERCISES: IExerciseConfig[] = [
     id: 'squat',
     title: 'Squats',
     summary:
-      'Side view: mid-thigh camera height, 2.5–4 m back, full torso and feet visible.',
+      'Side or front view — pick the camera angle before you start. Side checks depth and lean; front checks knee valgus and lateral torso shift.',
     cameraSetup:
       'Place the phone at mid-thigh height, 2.5–4 m away, side view. Keep your whole torso and feet in frame.',
+    cameraSetupFront:
+      'Place the phone at chest height, 2–3 m away, facing you. Frame both knees, hips, and shoulders — full body width visible.',
     analyzerKind: 'squat',
     thresholds: { ...DEFAULT_THRESHOLDS },
   },
@@ -37,16 +36,6 @@ export const EXERCISES: IExerciseConfig[] = [
     cameraSetup:
       'Side view preferred. Frame elbow, shoulder, pelvis, and knee on the working side.',
     analyzerKind: 'pushup',
-    thresholds: { ...DEFAULT_THRESHOLDS },
-  },
-  {
-    id: 'posture',
-    title: 'Desk posture',
-    summary:
-      'Front or 3/4 view: stable desk, upper torso and head in frame while seated.',
-    cameraSetup:
-      'Front or 3/4 view. Upper torso and head visible; keep the laptop position steady.',
-    analyzerKind: 'posture',
     thresholds: { ...DEFAULT_THRESHOLDS },
   },
 ]

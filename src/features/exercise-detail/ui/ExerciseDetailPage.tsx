@@ -1,10 +1,11 @@
 import { motion } from 'motion/react'
-import { ArrowLeft, Play, Sparkles } from 'lucide-react'
-import { useMemo } from 'react'
+import { ArrowLeft, Camera, Play, Sparkles } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { getExerciseById } from '@/shared/config/exercises'
+import type { ISquatCameraView } from '@/shared/types/exercise'
 import { Alert, AlertDescription, AlertTitle } from '@/shared/ui/alert'
 import { Button } from '@/shared/ui/button'
 import {
@@ -15,10 +16,29 @@ import {
   CardTitle,
 } from '@/shared/ui/card'
 import { Separator } from '@/shared/ui/separator'
+import { cn } from '@/shared/lib/cn'
+
+const SQUAT_VIEW_OPTIONS: Array<{
+  id: ISquatCameraView
+  label: string
+  description: string
+}> = [
+  {
+    id: 'side',
+    label: 'Side view',
+    description: 'Depth, knee-over-toe, forward torso lean',
+  },
+  {
+    id: 'front',
+    label: 'Front view',
+    description: 'Knee valgus and lateral torso shift (uses front camera on phones)',
+  },
+]
 
 export const ExerciseDetailPage = () => {
   const { exerciseId } = useParams()
   const navigate = useNavigate()
+  const [squatView, setSquatView] = useState<ISquatCameraView>('side')
 
   const exercise = useMemo(() => {
     if (!exerciseId) return undefined
@@ -36,6 +56,12 @@ export const ExerciseDetailPage = () => {
     )
   }
 
+  const isSquat = exercise.id === 'squat'
+  const activeCameraSetup =
+    isSquat && squatView === 'front' && exercise.cameraSetupFront
+      ? exercise.cameraSetupFront
+      : exercise.cameraSetup
+
   const handleTrainingClick = () => {
     toast.message('Training mode', {
       description: 'Guided sets and pacing will land here soon.',
@@ -43,7 +69,8 @@ export const ExerciseDetailPage = () => {
   }
 
   const handleStartClick = () => {
-    navigate(`/exercise/${exercise.id}/session`)
+    const params = isSquat ? `?view=${squatView}` : ''
+    navigate(`/exercise/${exercise.id}/session${params}`)
   }
 
   return (
@@ -69,15 +96,60 @@ export const ExerciseDetailPage = () => {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Camera setup</CardTitle>
-            <CardDescription>{exercise.cameraSetup}</CardDescription>
+            <CardDescription>{activeCameraSetup}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {isSquat ? (
+              <div className="space-y-3">
+                <p className="text-sm font-medium">Camera angle</p>
+                <div
+                  className="grid gap-2 sm:grid-cols-2"
+                  role="radiogroup"
+                  aria-label="Squat camera angle"
+                >
+                  {SQUAT_VIEW_OPTIONS.map((option) => {
+                    const selected = squatView === option.id
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        tabIndex={0}
+                        onClick={() => setSquatView(option.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            setSquatView(option.id)
+                          }
+                        }}
+                        className={cn(
+                          'rounded-lg border p-3 text-left transition-colors',
+                          selected
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border hover:border-primary/40',
+                        )}
+                      >
+                        <span className="flex items-center gap-2 text-sm font-medium">
+                          <Camera className="size-4 shrink-0" aria-hidden />
+                          {option.label}
+                        </span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          {option.description}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null}
+
             <Alert>
               <AlertTitle className="text-sm">Technique tutorial</AlertTitle>
               <AlertDescription>
                 Video walkthrough is a mock for now — follow the on-screen cues
-                during the live session. On the next screen you will tap Enable camera
-                and allow access when the browser prompts you.
+                during the live session. Camera access is requested automatically
+                if you already allowed it in this browser session.
               </AlertDescription>
             </Alert>
             <Separator />

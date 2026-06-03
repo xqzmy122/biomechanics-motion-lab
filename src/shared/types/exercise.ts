@@ -1,6 +1,8 @@
-export type IExerciseId = 'squat' | 'pushup' | 'posture'
+export type IExerciseId = 'squat' | 'pushup'
 
-export type IAnalyzerKind = 'squat' | 'pushup' | 'posture'
+export type IAnalyzerKind = 'squat' | 'pushup'
+
+export type ISquatCameraView = 'side' | 'front'
 
 export interface IExerciseThresholds {
   kneeBottomDeg: number
@@ -12,11 +14,8 @@ export interface IExerciseThresholds {
   depthHipBelowKneeEnabled: boolean
   bodyLineMaxDeg: number
   elbowFlareRatio: number
-  headForwardMaxNorm: number
-  shoulderAsymmetryMaxNorm: number
-  postureWindowSec: number
-  postureBadFraction: number
-  postureReminderIntervalMin: number
+  valgusMaxNorm: number
+  torsoShiftMaxNorm: number
   smoothingAlpha: number
 }
 
@@ -25,6 +24,7 @@ export interface IExerciseConfig {
   title: string
   summary: string
   cameraSetup: string
+  cameraSetupFront?: string
   analyzerKind: IAnalyzerKind
   thresholds: IExerciseThresholds
 }

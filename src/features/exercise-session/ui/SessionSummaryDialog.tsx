@@ -11,20 +11,10 @@ import {
 } from '@/shared/ui/dialog'
 import { Separator } from '@/shared/ui/separator'
 
-export interface IPostureIntervalSummary {
-  startSec: number
-  endSec: number
-  good: boolean
-}
-
 export interface ISessionSummary {
   exerciseTitle: string
   durationSec: number
   reps: number | null
-  postureBadFraction: number | null
-  postureScorePercent: number | null
-  postureIntervals: IPostureIntervalSummary[] | null
-  postureHowMeasured: string | null
   repQualityRows: IRepQualityRow[] | null
   comments: string[]
 }
@@ -35,15 +25,6 @@ export interface ISessionSummaryDialogProps {
   summary: ISessionSummary
   onDone: () => void
   onReplay: () => void
-}
-
-const formatRange = (startSec: number, endSec: number) => {
-  const fmt = (s: number) => {
-    const m = Math.floor(s / 60)
-    const sec = Math.floor(s % 60)
-    return `${m}:${sec.toString().padStart(2, '0')}`
-  }
-  return `${fmt(startSec)}–${fmt(endSec)}`
 }
 
 export const SessionSummaryDialog = ({
@@ -74,48 +55,6 @@ export const SessionSummaryDialog = ({
               <span className="text-muted-foreground">Repetitions: </span>
               <span className="font-medium tabular-nums">{summary.reps}</span>
             </p>
-          ) : null}
-          {summary.postureScorePercent !== null ? (
-            <p>
-              <span className="text-muted-foreground">Posture score: </span>
-              <span className="font-medium tabular-nums">
-                {Math.round(summary.postureScorePercent)}%
-              </span>
-              <span className="text-muted-foreground"> good time</span>
-            </p>
-          ) : null}
-          {summary.postureBadFraction !== null && summary.postureScorePercent === null ? (
-            <p>
-              <span className="text-muted-foreground">Poor posture share: </span>
-              <span className="font-medium tabular-nums">
-                {Math.round(summary.postureBadFraction * 100)}%
-              </span>
-            </p>
-          ) : null}
-          {summary.postureHowMeasured ? (
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              {summary.postureHowMeasured}
-            </p>
-          ) : null}
-          {summary.postureIntervals !== null && summary.postureIntervals.length > 0 ? (
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Good vs off intervals
-              </p>
-              <ul className="max-h-40 space-y-1 overflow-y-auto text-xs text-muted-foreground">
-                {summary.postureIntervals.map((iv, i) => (
-                  <li key={`${i}-${iv.startSec}`}>
-                    <span className="font-mono tabular-nums">
-                      {formatRange(iv.startSec, iv.endSec)}
-                    </span>
-                    {' · '}
-                    <span className={iv.good ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-300'}>
-                      {iv.good ? 'Good' : 'Off'}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
           ) : null}
           {summary.repQualityRows !== null && summary.repQualityRows.length > 0 ? (
             <div className="space-y-2">
