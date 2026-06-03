@@ -3,7 +3,6 @@ import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 import {
   angleAt,
   distance2,
-  midpoint,
   toPoint2,
 } from '@/features/exercise-session/lib/geometry'
 import type { IExerciseThresholds } from '@/shared/types/exercise'
@@ -39,18 +38,18 @@ const averageElbowAngle = (lm: NormalizedLandmark[]): number | null => {
   return left ?? right
 }
 
+/** Outward flare beyond the shoulder line (not distance from midline — that is ~0.5 at normal width). */
 const measureElbowFlareNorm = (lm: NormalizedLandmark[]): number | null => {
   const lSh = toPoint2(lm[IDX.L_SH])
   const rSh = toPoint2(lm[IDX.R_SH])
   const lEl = toPoint2(lm[IDX.L_EL])
   const rEl = toPoint2(lm[IDX.R_EL])
-  const shoulderMid = midpoint(lSh, rSh)
   const shoulderWidth = distance2(lSh, rSh)
   if (shoulderWidth < 1e-4) return null
 
-  const leftFlare = Math.abs(lEl.x - shoulderMid.x) / shoulderWidth
-  const rightFlare = Math.abs(rEl.x - shoulderMid.x) / shoulderWidth
-  return Math.max(leftFlare, rightFlare)
+  const leftOutward = Math.max(0, lEl.x - lSh.x) / shoulderWidth
+  const rightOutward = Math.max(0, rSh.x - rEl.x) / shoulderWidth
+  return Math.max(leftOutward, rightOutward)
 }
 
 export const createInitialPushupFrontState = (): IPushupState => ({

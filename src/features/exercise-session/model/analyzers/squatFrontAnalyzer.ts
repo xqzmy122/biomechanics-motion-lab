@@ -4,7 +4,6 @@ import {
   angleVsVertical,
   distance2,
   midpoint,
-  signedDistanceToLineNorm,
   toPoint2,
 } from '@/features/exercise-session/lib/geometry'
 import type { IExerciseThresholds } from '@/shared/types/exercise'
@@ -64,16 +63,24 @@ const measureFrontSquatMetrics = (lm: NormalizedLandmark[]): IFrontSquatMetrics 
   }
 }
 
-/** Medial collapse: knee shifts toward body midline relative to hip–ankle line */
-const valgusOffset = (
-  hip: ReturnType<typeof toPoint2>,
-  knee: ReturnType<typeof toPoint2>,
-  ankle: ReturnType<typeof toPoint2>,
-  isLeftLeg: boolean,
+/** Medial knee shift vs ankle and hip — reliable from front view (knee caves inward toward midline). */
+const measureFrontValgusNorm = (
+  lm: NormalizedLandmark[],
+  hipWidth: number,
 ): number | null => {
-  const offset = signedDistanceToLineNorm(knee, hip, ankle)
-  if (offset === null) return null
-  return isLeftLeg ? offset : -offset
+  if (hipWidth < 1e-4) return null
+
+  const lHip = toPoint2(lm[IDX.L_HIP])
+  const rHip = toPoint2(lm[IDX.R_HIP])
+  const lKnee = toPoint2(lm[IDX.L_KNEE])
+  const rKnee = toPoint2(lm[IDX.R_KNEE])
+  const lAnk = toPoint2(lm[IDX.L_ANK])
+  const rAnk = toPoint2(lm[IDX.R_ANK])
+
+  const leftMedial = Math.max(lAnk.x - lKnee.x, lHip.x - lKnee.x) / hipWidth
+  const rightMedial = Math.max(rKnee.x - rAnk.x, rKnee.x - rHip.x) / hipWidth
+
+  return Math.max(0, leftMedial, rightMedial)
 }
 
 const ensureBaseline = (
@@ -96,13 +103,17 @@ const ensureBaseline = (
   }
 }
 
-const isDescending = (
+const isFormCheckPhase = (
+  phase: ISquatPhase,
   hipDropNorm: number,
   thighDeltaDeg: number,
   t: IExerciseThresholds,
 ): boolean =>
-  hipDropNorm > t.frontHipDropEccentricNorm * 0.55 ||
-  thighDeltaDeg > t.frontThighAngleEccentricDeg * 0.55
+  phase === 'eccentric' ||
+  phase === 'bottom' ||
+  phase === 'concentric' ||
+  hipDropNorm > t.frontHipDropEccentricNorm * 0.25 ||
+  thighDeltaDeg > t.frontThighAngleEccentricDeg * 0.25
 
 export const createInitialSquatFrontState = (): ISquatFrontState => ({
   phase: 'stance',
@@ -163,27 +174,21 @@ export const analyzeSquatFrontFrame = (
 
   const hipDropNorm = (metrics.hipMidY - state.baselineHipY) / state.bodyScale
   const thighDeltaDeg = metrics.thighAngleDeg - state.baselineThighAngleDeg
-  const descending = isDescending(hipDropNorm, thighDeltaDeg, t)
+  const checkForm = isFormCheckPhase(state.phase, hipDropNorm, thighDeltaDeg, t)
 
-  if (descending) {
+  if (checkForm) {
     const lHip = toPoint2(lm[IDX.L_HIP])
     const rHip = toPoint2(lm[IDX.R_HIP])
-    const lKnee = toPoint2(lm[IDX.L_KNEE])
-    const rKnee = toPoint2(lm[IDX.R_KNEE])
-    const lAnk = toPoint2(lm[IDX.L_ANK])
-    const rAnk = toPoint2(lm[IDX.R_ANK])
+    const hipWidth = distance2(lHip, rHip)
+    const valgusNorm = measureFrontValgusNorm(lm, hipWidth)
 
-    const leftValgus = valgusOffset(lHip, lKnee, lAnk, true)
-    const rightValgus = valgusOffset(rHip, rKnee, rAnk, false)
-    const worstValgus = Math.max(leftValgus ?? 0, rightValgus ?? 0)
-
-    if (worstValgus > t.valgusMaxNorm) {
+    if (valgusNorm !== null && valgusNorm > t.valgusMaxNorm) {
       events.push({
         id: 'KNEE_VALGUS',
         message: 'Push the knees outward — avoid letting them collapse inward.',
         severity: 'warning',
       })
-      comments.push('Knee valgus detected during descent.')
+      comments.push('Knee valgus detected during squat.')
     }
 
     if (
