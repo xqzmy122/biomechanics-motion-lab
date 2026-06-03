@@ -100,10 +100,7 @@ export const ExerciseSessionPage = () => {
     facingUser,
     isRequesting: isCameraRequesting,
     canUseCamera,
-    hasFrontCamera,
-    canSwitchCamera,
     requestCamera,
-    switchToFrontCamera,
     toggleCamera,
   } = useCameraStream({ initialFacing: facingPreference })
   const { ready: poseReady, error: poseError, detectForVideo } =
@@ -407,6 +404,16 @@ export const ExerciseSessionPage = () => {
             }
 
             repFeedbackByIdRef.current.clear()
+          } else if (
+            exercise.analyzerKind === 'squat' &&
+            events.some((e) => e.id === 'DEPTH_SHALLOW')
+          ) {
+            const depthShallow = events.find((e) => e.id === 'DEPTH_SHALLOW')
+            if (depthShallow) {
+              const key = `${depthShallow.id}-partial-${Math.round(detectTs)}`
+              pushPrompt({ ...depthShallow, key })
+            }
+            repFeedbackByIdRef.current.clear()
           }
 
           const reps =
@@ -523,21 +530,11 @@ export const ExerciseSessionPage = () => {
   }
 
   const handleSwitchCameraClick = () => {
-    if (facingUser) {
-      void toggleCamera()
-      return
-    }
-    if (hasFrontCamera) {
-      void switchToFrontCamera()
-      return
-    }
     void toggleCamera()
   }
 
-  const showCameraSwitch =
-    Boolean(stream) &&
-    canSwitchCamera &&
-    sessionPhase !== 'countdown'
+  const showCameraSwitch = canUseCamera && !isInsecure
+  const cameraSwitchDisabled = isCameraRequesting
 
   const blockingOverlay =
     isInsecure ||
@@ -569,7 +566,7 @@ export const ExerciseSessionPage = () => {
         aria-label="Camera preview with pose overlay"
       />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-black/70 to-transparent pb-16 pt-4">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-50 bg-gradient-to-b from-black/70 to-transparent pb-16 pt-4">
         <div className="pointer-events-auto mx-auto flex max-w-3xl items-start justify-between gap-3 px-4">
           <Button variant="secondary" size="sm" className="gap-2" asChild>
             <Link
@@ -588,7 +585,7 @@ export const ExerciseSessionPage = () => {
                 size="sm"
                 className="gap-2"
                 onClick={handleSwitchCameraClick}
-                disabled={isCameraRequesting}
+                disabled={cameraSwitchDisabled}
                 aria-label={
                   facingUser
                     ? 'Switch to back camera'

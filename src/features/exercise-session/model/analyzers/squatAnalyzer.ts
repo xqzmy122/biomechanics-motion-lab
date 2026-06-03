@@ -208,6 +208,12 @@ export const analyzeSquatFrame = (
     if (kneeAngle < t.kneeBottomDeg) {
       phase = 'bottom'
       sawBottom = true
+    } else if (kneeAngle > t.kneeStandDeg - STANCE_LOCKOUT_GAP) {
+      phase = 'stance'
+      if (t.depthHipBelowKneeEnabled && minKneeAngleDeg !== null) {
+        appendDepthFeedback(events, comments, minKneeAngleDeg, t)
+      }
+      minKneeAngleDeg = null
     }
   } else if (phase === 'bottom') {
     minKneeAngleDeg = trackMinKneeAngle(minKneeAngleDeg, kneeAngle)
